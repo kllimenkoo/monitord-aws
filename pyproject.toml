@@ -1,0 +1,15 @@
+[tool.pyright]
+extraPaths = [".", "lambda"]
+venvPath = "."
+venv = ".venv"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.format]
+quote-style = "single"
+docstring-code-format = true
