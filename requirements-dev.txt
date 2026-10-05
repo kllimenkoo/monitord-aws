@@ -1,1 +1,8 @@
 pytest==8.4.2
+ruff
+pyright
+fastapi
+mangum
+aiofiles
+aiosqlite
+uvicorn
