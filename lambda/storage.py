@@ -1,201 +1,195 @@
-import asyncio
-import os
 import time
+from decimal import Decimal
 
-import aiosqlite
-from models import DiskMetrics, NetMetrics, RamMetrics
-
-DB_PATH = os.environ.get('MONITORD_DB', '/var/lib/monitord/monitord.db')
-_db: aiosqlite.Connection | None = None
-tables: tuple = (
-    """
-    CREATE TABLE IF NOT EXISTS cpu_metrics(
-        timestamp REAL,
-        usage_percentage REAL
-    )
-    """.strip(),
-    """
-    CREATE TABLE IF NOT EXISTS ram_metrics(
-        timestamp REAL,
-        mem_usage_percentage REAL,
-        swap_usage_percentage REAL
-    )
-    """.strip(),
-    """
-    CREATE TABLE IF NOT EXISTS disk_metrics(
-        timestamp REAL,
-        device TEXT,
-        read_iops REAL,
-        read_bytes_per_sec REAL,
-        write_iops REAL,
-        write_bytes_per_sec REAL,
-        io_utilization_percentage REAL
-    )
-    """.strip(),
-    """
-    CREATE TABLE IF NOT EXISTS net_metrics(
-        timestamp REAL,
-        interface TEXT,
-        receive_bytes_per_sec REAL,
-        receive_packets_per_sec REAL,
-        transmit_bytes_per_sec REAL,
-        transmit_packets_per_sec REAL,
-        receive_packet_error_count REAL,
-        receive_packet_drop_count REAL,
-        transmit_packet_error_count REAL,
-        transmit_packet_drop_count REAL
-    )
-    """.strip(),
+import aioboto3
+from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
+from models import Alert, DiskMetrics, NetMetrics, RamMetrics
+from tables import (
+    ALERTS_TABLE,
+    CPU_TABLE,
+    DISK_TABLE,
+    KNOWN_DEVICES_TABLE,
+    KNOWN_INTERFACES_TABLE,
+    NET_TABLE,
+    RAM_TABLE,
 )
 
+_resource = None
 
-async def get_db() -> aiosqlite.Connection:
-    global _db
-    if _db is None:
-        _db = await aiosqlite.connect(DB_PATH, autocommit=True)
-        await _db.execute('PRAGMA journal_mode=WAL')
-        _db.row_factory = aiosqlite.Row
 
-    return _db
+async def get_resource():
+    global _resource
+    if _resource is None:
+        session = aioboto3.Session()
+        _resource = await session.resource('dynamodb').__aenter__()
+    return _resource
 
 
 async def init_db() -> None:
-    db = await get_db()
-    for sql in tables:
-        await db.execute(sql)
-
-
-async def checkpoint_db() -> None:
-    while True:
-        await asyncio.sleep(60)
+    db = await get_resource()
+    for table_def in [
+        CPU_TABLE,
+        RAM_TABLE,
+        DISK_TABLE,
+        NET_TABLE,
+        ALERTS_TABLE,
+        KNOWN_DEVICES_TABLE,
+        KNOWN_INTERFACES_TABLE,
+    ]:
         try:
-            db = await get_db()
-            await db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
-        except Exception as e:
-            print(f'Checkpoint failed: {e}', flush=True)
+            await db.create_table(**table_def)
+        except ClientError as e:
+            if e.response.get('Error', {}).get('Code', {}) == 'ResourceInUseException':
+                pass
+            else:
+                raise
 
 
 async def write_cpu(usage_percentage: float | None) -> None:
-    db = await get_db()
-    await db.execute(
-        'INSERT INTO cpu_metrics VALUES (?, ?)', (time.time(), usage_percentage)
+    db = await get_resource()
+    table = await db.Table('cpu_metrics')
+    await table.put_item(
+        Item={
+            'metric': 'cpu',
+            'timestamp': Decimal(str(time.time())),
+            'usage_percentage': Decimal(str(usage_percentage)),
+        }
     )
 
 
 async def write_ram(metrics: RamMetrics) -> None:
-    db = await get_db()
-    await db.execute(
-        'INSERT INTO ram_metrics VALUES (?, ?, ?)',
-        (time.time(), metrics.mem_usage_percentage, metrics.swap_usage_percentage),
+    db = await get_resource()
+    table = await db.Table('ram_metrics')
+    await table.put_item(
+        Item={
+            'metric': 'ram',
+            'timestamp': Decimal(str(time.time())),
+            'mem_usage_percentage': Decimal(str(metrics.mem_usage_percentage)),
+            'swap_usage_percentage': Decimal(str(metrics.swap_usage_percentage)),
+        }
     )
 
 
 async def write_disk(metrics: dict[str, DiskMetrics]) -> None:
-    db = await get_db()
+    db = await get_resource()
+    table = await db.Table('disk_metrics')
     for device, dev_metrics in metrics.items():
-        await db.execute(
-            'INSERT INTO disk_metrics VALUES (?, ?, ?, ?, ?, ?, ?)',
-            (
-                time.time(),
-                device,
-                dev_metrics.read_iops,
-                dev_metrics.read_bytes_per_sec,
-                dev_metrics.write_iops,
-                dev_metrics.write_bytes_per_sec,
-                dev_metrics.io_utilization_percentage,
-            ),
+        await table.put_item(
+            Item={
+                'metric': 'disk',
+                'dev_name': device,
+                'timestamp': Decimal(str(time.time())),
+                'io_utilization_percentage': Decimal(
+                    str(dev_metrics.io_utilization_percentage)
+                ),
+            }
         )
 
 
 async def write_net(metrics: dict[str, NetMetrics]) -> None:
-    db = await get_db()
+    db = await get_resource()
+    table = await db.Table('net_metrics')
     for interface, intf_metrics in metrics.items():
-        await db.execute(
-            'INSERT INTO net_metrics VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            (
-                time.time(),
-                interface,
-                intf_metrics.receive_bytes_per_sec,
-                intf_metrics.receive_packets_per_sec,
-                intf_metrics.transmit_bytes_per_sec,
-                intf_metrics.transmit_packets_per_sec,
-                intf_metrics.receive_packet_error_count,
-                intf_metrics.receive_packet_drop_count,
-                intf_metrics.transmit_packet_error_count,
-                intf_metrics.transmit_packet_drop_count,
-            ),
+        await table.put_item(
+            Item={
+                'metric': 'network',
+                'intf_name': interface,
+                'timestamp': Decimal(str(time.time())),
+                'receive_bytes_per_sec': Decimal(
+                    str(intf_metrics.receive_bytes_per_sec)
+                ),
+                'receive_packet_error_count': intf_metrics.receive_packet_error_count,
+                'receive_packet_drop_count': intf_metrics.receive_packet_drop_count,
+                'transmit_bytes_per_sec': Decimal(
+                    str(intf_metrics.transmit_bytes_per_sec)
+                ),
+                'transmit_packet_error_count': intf_metrics.transmit_packet_error_count,
+                'transmit_packet_drop_count': intf_metrics.transmit_packet_drop_count,
+            }
         )
 
 
-async def read_cpu_recent(limit: int) -> list[aiosqlite.Row]:
-    db = await get_db()
-    async with db.execute(
-        """
-        SELECT timestamp, usage_percentage FROM cpu_metrics
-        ORDER BY timestamp DESC LIMIT ?
-        """,
-        (limit,),
-    ) as cursor:
-        result = await cursor.fetchall()
-    return result  # type: ignore
+async def write_alert(alert: Alert) -> None:
+    db = await get_resource()
+    table = await db.Table('alerts')
+    await table.put_item(
+        Item={
+            'pk': 'alert',
+            'timestamp': Decimal(str(time.time())),
+            'metric': alert.metric,
+            'device': alert.device,
+            'avg_short': Decimal(str(alert.avg_short)),
+            'avg_long': Decimal(str(alert.avg_long)),
+            'threshold': Decimal(str(alert.threshold)),
+        }
+    )
 
 
-async def read_ram_recent(limit: int) -> list[aiosqlite.Row]:
-    db = await get_db()
-    async with db.execute(
-        """
-        SELECT timestamp, mem_usage_percentage, swap_usage_percentage
-        FROM ram_metrics ORDER BY timestamp DESC LIMIT ?
-        """,
-        (limit,),
-    ) as cursor:
-        result = await cursor.fetchall()
-    return result  # type: ignore
+async def read_cpu_recent(limit: int) -> list:
+    db = await get_resource()
+    table = await db.Table('cpu_metrics')
+    response = await table.query(
+        KeyConditionExpression=Key('metric').eq('cpu'),
+        ScanIndexForward=False,
+        Limit=limit,
+    )
+    return response['Items']
 
 
-async def read_disk_recent(device: str, limit: int) -> list[aiosqlite.Row]:
-    db = await get_db()
-    async with db.execute(
-        """
-        SELECT timestamp, device, read_iops,
-        read_bytes_per_sec, write_iops, write_bytes_per_sec,
-        io_utilization_percentage
-        FROM disk_metrics
-        WHERE device = ? ORDER BY timestamp DESC LIMIT ?
-        """,
-        (device, limit),
-    ) as cursor:
-        result = await cursor.fetchall()
-    return result  # type: ignore
+async def read_ram_recent(limit: int) -> list:
+    db = await get_resource()
+    table = await db.Table('ram_metrics')
+    response = await table.query(
+        KeyConditionExpression=Key('metric').eq('ram'),
+        ScanIndexForward=False,
+        Limit=limit,
+    )
+    return response['Items']
 
 
-async def read_net_recent(interface: str, limit: int) -> list[aiosqlite.Row]:
-    db = await get_db()
-    async with db.execute(
-        """
-        SELECT timestamp, interface,
-        receive_bytes_per_sec, receive_packets_per_sec,
-        transmit_bytes_per_sec, transmit_packets_per_sec,
-        receive_packet_error_count, receive_packet_drop_count,
-        transmit_packet_error_count, transmit_packet_drop_count
-        FROM net_metrics
-        WHERE interface = ? ORDER BY timestamp DESC LIMIT ?
-        """,
-        (interface, limit),
-    ) as cursor:
-        result = await cursor.fetchall()
-    return result  # type: ignore
+async def read_disk_recent(device: str, limit: int) -> list:
+    db = await get_resource()
+    table = await db.Table('disk_metrics')
+    response = await table.query(
+        KeyConditionExpression=Key('dev_name').eq(device),
+        ScanIndexForward=False,
+        Limit=limit,
+    )
+    return response['Items']
 
 
-async def get_known_devices() -> list[str]:
-    db = await get_db()
-    async with db.execute('SELECT DISTINCT device FROM disk_metrics') as cursor:
-        result = await cursor.fetchall()
-    return [device for (device,) in result]
+async def read_net_recent(interface: str, limit: int) -> list:
+    db = await get_resource()
+    table = await db.Table('net_metrics')
+    response = await table.query(
+        KeyConditionExpression=Key('intf_name').eq(interface),
+        ScanIndexForward=False,
+        Limit=limit,
+    )
+    return response['Items']
 
 
-async def get_known_interfaces() -> list[str]:
-    db = await get_db()
-    async with db.execute('SELECT DISTINCT interface FROM net_metrics') as cursor:
-        result = await cursor.fetchall()
-    return [interface for (interface,) in result]
+async def read_alert(limit: int) -> list:
+    db = await get_resource()
+    table = await db.Table('alerts')
+    response = await table.query(
+        KeyConditionExpression=Key('pk').eq('alert'),
+        ScanIndexForward=False,
+        Limit=limit,
+    )
+    return response['Items']
+
+
+async def get_known_devices() -> list:
+    db = await get_resource()
+    table = await db.Table('known_devices')
+    response = await table.scan()
+    return response['Items']
+
+
+async def get_known_interfaces() -> list:
+    db = await get_resource()
+    table = await db.Table('known_interfaces')
+    response = await table.scan()
+    return response['Items']
