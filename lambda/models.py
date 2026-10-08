@@ -63,3 +63,13 @@ class NetMetrics(NamedTuple):
     transmit_bytes_per_sec: float
     transmit_packet_error_count: int
     transmit_packet_drop_count: int
+
+
+class Alert(NamedTuple):
+    """Holds alerts after anomaly was detected"""
+
+    metric: str
+    device: str | None
+    avg_short: float
+    avg_long: float
+    threshold: float
