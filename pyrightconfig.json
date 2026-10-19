@@ -1,0 +1,18 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "executionEnvironments": [
+    {
+      "root": "lambda",
+      "extraPaths": ["lambda"]
+    },
+    {
+      "root": "daemon",
+      "extraPaths": ["daemon"]
+    },
+    {
+      "root": ".",
+      "extraPaths": []
+    }
+  ]
+}
