@@ -1,8 +1,10 @@
-pytest==8.4.2
-ruff
-pyright
 fastapi
 mangum
-aiofiles
 aiosqlite
-uvicorn
+aioboto3
+types-aioboto3[dynamodb]
+boto3-stubs[dynamodb]
+aws-cdk-lib
+constructs
+pytest
+pytest-asyncio

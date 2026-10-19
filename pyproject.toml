@@ -1,5 +1,5 @@
 [tool.pyright]
-extraPaths = [".", "lambda"]
+extraPaths = [".", "lambda", "daemon"]
 venvPath = "."
 venv = ".venv"
 
