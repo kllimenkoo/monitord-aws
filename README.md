@@ -1,58 +1,129 @@
+# monitord-aws
 
-# Welcome to your CDK Python project!
+A real-time Linux system monitoring dashboard deployed on AWS using Infrastructure as Code (CDK).
 
-This is a blank project for CDK development with Python.
+A daemon runs on an EC2 instance, collects CPU, memory, disk and network metrics every 2 seconds, and writes them to DynamoDB. A FastAPI Lambda serves the data via HTTP API Gateway. A static frontend hosted on S3 + CloudFront polls the API and renders live charts.
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+![demo](assets/demo.gif)
+---
 
-This project is set up like a standard Python project.  The initialization
-process also creates a virtualenv within this project, stored under the `.venv`
-directory.  To create the virtualenv it assumes that there is a `python3`
-(or `python` for Windows) executable in your path with access to the `venv`
-package. If for any reason the automatic creation of the virtualenv fails,
-you can create the virtualenv manually.
-
-To manually create a virtualenv on MacOS and Linux:
+## Architecture
 
 ```
-$ python3 -m venv .venv
+EC2 (t3.micro)
+  └─ monitord daemon (Python, asyncio)
+       ├─ collects: CPU, RAM, disk I/O, network throughput
+       ├─ detects anomalies → writes alerts
+       └─ writes to DynamoDB (7 tables)
+
+DynamoDB
+  ├─ cpu_metrics, ram_metrics, disk_metrics, net_metrics
+  ├─ alerts
+  └─ known_devices, known_interfaces
+
+Lambda (Python 3.12, FastAPI + Mangum)
+  └─ reads from DynamoDB
+  └─ exposed via HTTP API Gateway
+
+S3 + CloudFront
+  └─ static frontend (HTML/CSS/JS, Chart.js)
+  └─ config.js injected at deploy time with the API URL
 ```
 
-After the init process completes and the virtualenv is created, you can use the following
-step to activate your virtualenv.
+All infrastructure is defined in a single CDK stack (`monitord_aws/monitord_aws_stack.py`).
+
+---
+
+## Stack
+
+| Layer            | Service                         |
+| ---------------- | ------------------------------- |
+| IaC              | AWS CDK (Python)                |
+| Compute (daemon) | EC2 t3.micro, Amazon Linux 2023 |
+| Compute (API)    | AWS Lambda (Python 3.12)        |
+| API              | HTTP API Gateway                |
+| Database         | DynamoDB (on-demand)            |
+| Frontend hosting | S3 + CloudFront                 |
+| Daemon storage   | S3 (daemon code synced at boot) |
+
+---
+
+## Project structure
 
 ```
-$ source .venv/bin/activate
+monitord-aws/
+├── daemon/               # EC2 daemon
+│   ├── daemon.py         # main loop, metric collectors
+│   ├── anomaly.py        # anomaly detection, alert writes
+│   ├── storage.py        # DynamoDB reads and writes
+│   ├── models.py         # dataclasses
+│   ├── readers.py        # low-level /proc readers
+│   ├── compute.py        # CPU/RAM reading logic
+│   └── requirements.txt
+├── lambda/               # Lambda API
+│   ├── api.py            # FastAPI routes
+│   ├── storage.py        # DynamoDB reads
+│   ├── schemas.py        # Pydantic response models
+│   └── requirements.txt
+├── frontend/             # Static dashboard
+│   ├── index.html
+│   ├── script.js         # Chart.js charts, polling loop
+│   └── styles.css
+├── monitord_aws/
+│   └── monitord_aws_stack.py   # CDK stack
+├── scripts/
+│   └── install_daemon.sh       # EC2 user data script
+└── tests/
 ```
 
-If you are a Windows platform, you would activate the virtualenv like this:
+---
+
+## Deploy
+
+### Prerequisites
+
+- AWS CLI configured (`aws configure`)
+- CDK installed (`npm install -g aws-cdk`)
+- Python 3.12+, a virtualenv with `pip install -r requirements.txt`
+- Docker (used by CDK to bundle the Lambda)
+
+### Bootstrap (once per account/region)
+
+```bash
+cdk bootstrap
+```
+
+### Deploy
+
+```bash
+cdk deploy
+```
+
+CDK will output two URLs:
 
 ```
-% .venv\Scripts\activate.bat
+MonitordAwsStack.ApiUrl = https://...execute-api.eu-north-1.amazonaws.com/
+MonitordAwsStack.DashboardUrl = https://...cloudfront.net
 ```
 
-Once the virtualenv is activated, you can install the required dependencies.
+Open the `DashboardUrl` in a browser. The EC2 daemon starts automatically on boot — data appears within ~30 seconds.
 
-```
-$ pip install -r requirements.txt
-```
+### Tear down
 
-At this point you can now synthesize the CloudFormation template for this code.
-
-```
-$ cdk synth
+```bash
+cdk destroy
 ```
 
-To add additional dependencies, for example other CDK libraries, just add
-them to your `requirements.txt` file and rerun the `python -m pip install -r requirements.txt`
-command.
+Then manually empty and delete the two S3 buckets (frontend and daemon) — CDK cannot delete non-empty buckets automatically.
 
-## Useful commands
+---
 
- * `cdk ls`          list all stacks in the app
- * `cdk synth`       emits the synthesized CloudFormation template
- * `cdk deploy`      deploy this stack to your default AWS account/region
- * `cdk diff`        compare deployed stack with current state
- * `cdk docs`        open CDK documentation
+## How the daemon works
 
-Enjoy!
+The daemon runs four async collectors (CPU, RAM, disk, network) in a `TaskGroup`, each writing to DynamoDB every 2 seconds. A separate anomaly checker runs on the same loop, reads recent windows of each metric, and fires an alert to DynamoDB when the short-window average significantly exceeds the long-window baseline.
+
+---
+
+## How the frontend works
+
+`config.js` is generated at deploy time by CDK with the API Gateway URL injected as `window.apiUrl`. On load, the dashboard fetches device/interface names to know which disk and network charts to render, then polls all endpoints every 2 seconds to update the charts.
