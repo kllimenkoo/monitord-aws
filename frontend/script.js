@@ -93,7 +93,13 @@ function renderAlerts(alerts) {
     return;
   }
   container.innerHTML = alerts
-    .map((line) => `<div class="alert-item">${line.trim()}</div>`)
+    .map(
+      (alert) =>
+        `<div class="alert-item">[${alert.metric}] ${alert.device ?? ""}
+        avg: ${parseFloat(alert.avg_short).toFixed(1)}
+        vs ${parseFloat(alert.avg_long).toFixed(1)}
+        (threshold: ${parseFloat(alert.threshold).toFixed(1)})</div>`,
+    )
     .join("");
 }
 
