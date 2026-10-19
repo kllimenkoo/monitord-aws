@@ -1,5 +1,3 @@
 fastapi
 mangum
-aiofiles
-aiosqlite
-uvicorn
+aioboto3
