@@ -1,3 +1,5 @@
+[![Unit Tests](https://github.com/kllimenkoo/monitord-aws/actions/workflows/test.yml/badge.svg)](https://github.com/kllimenkoo/monitord-aws/actions/workflows/test.yml)
+
 # monitord-aws
 
 A real-time Linux system monitoring dashboard deployed on AWS using Infrastructure as Code (CDK).
