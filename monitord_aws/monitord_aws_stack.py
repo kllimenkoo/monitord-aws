@@ -2,6 +2,7 @@ from aws_cdk import (
     BundlingOptions,
     CfnOutput,
     Duration,
+    RemovalPolicy,
     Stack,
 )
 from aws_cdk import (
@@ -72,6 +73,7 @@ class MonitordAwsStack(Stack):
             sort_key=dynamodb.Attribute(
                 name='timestamp', type=dynamodb.AttributeType.NUMBER
             ),
+            removal_policy=RemovalPolicy.DESTROY,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
         cpu_table.grant_read_data(fn)
@@ -86,6 +88,7 @@ class MonitordAwsStack(Stack):
             sort_key=dynamodb.Attribute(
                 name='timestamp', type=dynamodb.AttributeType.NUMBER
             ),
+            removal_policy=RemovalPolicy.DESTROY,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
         ram_table.grant_read_data(fn)
@@ -100,6 +103,7 @@ class MonitordAwsStack(Stack):
             sort_key=dynamodb.Attribute(
                 name='timestamp', type=dynamodb.AttributeType.NUMBER
             ),
+            removal_policy=RemovalPolicy.DESTROY,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
         disk_table.grant_read_data(fn)
@@ -114,6 +118,7 @@ class MonitordAwsStack(Stack):
             sort_key=dynamodb.Attribute(
                 name='timestamp', type=dynamodb.AttributeType.NUMBER
             ),
+            removal_policy=RemovalPolicy.DESTROY,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
         net_table.grant_read_data(fn)
@@ -125,6 +130,7 @@ class MonitordAwsStack(Stack):
             partition_key=dynamodb.Attribute(
                 name='device', type=dynamodb.AttributeType.STRING
             ),
+            removal_policy=RemovalPolicy.DESTROY,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
         known_devices_table.grant_read_data(fn)
@@ -136,6 +142,7 @@ class MonitordAwsStack(Stack):
             partition_key=dynamodb.Attribute(
                 name='interface', type=dynamodb.AttributeType.STRING
             ),
+            removal_policy=RemovalPolicy.DESTROY,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
         known_interfaces_table.grant_read_data(fn)
@@ -150,6 +157,7 @@ class MonitordAwsStack(Stack):
             sort_key=dynamodb.Attribute(
                 name='timestamp', type=dynamodb.AttributeType.NUMBER
             ),
+            removal_policy=RemovalPolicy.DESTROY,
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
         )
         alerts_table.grant_read_data(fn)
@@ -171,7 +179,12 @@ class MonitordAwsStack(Stack):
         known_interfaces_table.grant_read_write_data(role)
         alerts_table.grant_read_write_data(role)
 
-        bucket_daemon = s3.Bucket(self, 'MonitordBucketDaemon')
+        bucket_daemon = s3.Bucket(
+            self,
+            'MonitordBucketDaemon',
+            auto_delete_objects=True,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
         bucket_daemon.grant_read(role)
 
         daemon_deploy = s3deploy.BucketDeployment(
@@ -203,7 +216,12 @@ class MonitordAwsStack(Stack):
 
         instance.node.add_dependency(daemon_deploy)
 
-        bucket_frontend = s3.Bucket(self, 'MonitordBucketFrontend')
+        bucket_frontend = s3.Bucket(
+            self,
+            'MonitordBucketFrontend',
+            auto_delete_objects=True,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
 
         distribution = cloudfront.Distribution(
             self,
