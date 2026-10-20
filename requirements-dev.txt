@@ -1,10 +1,4 @@
-fastapi
-mangum
-aiosqlite
-aioboto3
-types-aioboto3[dynamodb]
-boto3-stubs[dynamodb]
-aws-cdk-lib
-constructs
-pytest
-pytest-asyncio
+pytest==8.4.2
+pytest-asyncio==1.4.0
+types-aioboto3[dynamodb]==15.5.0
+boto3-stubs[dynamodb]==1.43.111
