@@ -110,13 +110,20 @@ MonitordAwsStack.DashboardUrl = https://...cloudfront.net
 
 Open the `DashboardUrl` in a browser. The EC2 daemon starts automatically on boot — data appears within ~30 seconds.
 
-### Tear down
+### Teardown
 
-```bash
+To tear down the project, run:
 cdk destroy
-```
+This deletes all DynamoDB tables, S3 buckets (daemon and frontend), EC2 instance, Lambda function, and API Gateway.
 
-Then manually empty and delete the two S3 buckets (frontend and daemon) — CDK cannot delete non-empty buckets automatically.
+The CDK bootstrap resources (CloudFormation CDKToolkit stack and its S3 assets bucket) are not managed by this stack and persist after cdk destroy. To fully clean up:
+aws s3 rb s3://cdk-hnb659fds-assets-<account-id>-eu-north-1 --force
+aws cloudformation delete-stack --stack-name CDKToolkit
+aws cloudformation wait stack-delete-complete --stack-name CDKToolkit
+
+To redeploy after a full cleanup:
+cdk bootstrap
+cdk deploy
 
 ---
 
