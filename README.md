@@ -137,6 +137,23 @@ cdk deploy
 
 ---
 
+## Assumptions, trade-offs, and known limitations
+
+**Assumptions:**
+- Single environment, no dev/staging/prod separation
+- Default VPC is sufficient for a demo project
+
+**Trade-offs:**
+- DynamoDB over a relational database — fits the append-heavy time-series write pattern well, but lacks complex querying capabilities
+- No authentication on the API — acceptable for a demo, would require proper auth in production
+
+**Known limitations:**
+- No metrics retention policy — tables grow indefinitely
+- No alerting/notification delivery — alerts are stored in DynamoDB but not pushed anywhere (email, Slack etc.)
+- EC2 instance is a single point of failure for metric collection
+
+---
+
 ## How the daemon works
 
 The daemon runs four async collectors (CPU, RAM, disk, network) in a `TaskGroup`, each writing to DynamoDB every 2 seconds. A separate anomaly checker runs on the same loop, reads recent windows of each metric, and fires an alert to DynamoDB when the short-window average significantly exceeds the long-window baseline.
